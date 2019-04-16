@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import init
+import torch.nn.functional as F
 import functools
 from torch.optim import lr_scheduler
 
@@ -152,6 +153,50 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
+class TravelDiscriminator(nn.Module):
+
+    def __init__(self, input_nc, n, output_nc, is_discriminator=True):
+        super().__init__()
+        conv = [
+            nn.Conv2d(input_nc, n, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(n),
+
+            nn.Conv2d(n, 2 * n, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(2 * n),
+
+            nn.Conv2d(2 * n, 4 * n, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(4 * n),
+
+            nn.Conv2d(4 * n, 8 * n, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(8 * n),
+
+            nn.Conv2d(8 * n, 8 * n, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(8 * n)
+        ]
+        # Remove first BN layer for the discriminator
+        if is_discriminator:
+            conv.pop(2)
+        self.conv = nn.Sequential(*conv)
+        self.fc = nn.Linear(n * 8 * 4 * 4, output_nc)
+
+    def forward(self, x):
+        x = self.conv(x)
+        # Flatten
+        x = x.view(x.shape[0], -1)
+        x = self.fc(x)
+        return x
+
+
+def define_D_travel(input_nc, n, output_nc, is_discriminator, init_type='normal', init_gain=0.02, gpu_ids=[]):
+    net = TravelDiscriminator(input_nc, n, output_nc, is_discriminator)
+    return init_net(net, init_type, init_gain, gpu_ids)
+
+
 def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[]):
     """Create a discriminator
 
@@ -194,6 +239,14 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % net)
     return init_net(net, init_type, init_gain, gpu_ids)
+
+
+def define_S(input_nc, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[]):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+
+    return init_net(net, init_type, init_gain, gpu_ids)
+
 
 
 ##############################################################################
@@ -527,6 +580,38 @@ class UnetSkipConnectionBlock(nn.Module):
             return self.model(x)
         else:   # add skip connections
             return torch.cat([x, self.model(x)], 1)
+
+
+class View(nn.Module):
+
+    def __init__(self, shape):
+        super().__init__()
+        self._shape = shape
+
+    def forward(self, x):
+        return x.view(self._shape)
+
+
+class Embedding(nn.Module):
+
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(input_nc, 64, 3),
+            norm_layer(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(input_nc, 64, 3),
+            norm_layer(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(input_nc, 64, 3),
+            norm_layer(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(input_nc, 64, 3),
+            norm_layer(64),
+            nn.ReLU(inplace=True),
+            View((-1,)),
+            # nn.Linear(1000)
+        )
 
 
 class NLayerDiscriminator(nn.Module):
