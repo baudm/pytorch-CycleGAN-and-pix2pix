@@ -56,7 +56,7 @@ class TravelGANModel(BaseModel):
         Identity loss (optional): lambda_identity * (||G_A(B) - B|| * lambda_B + ||G_B(A) - A|| * lambda_A) (Sec 5.2 "Photo generation from paintings" in the paper)
         Dropout is not used in the original CycleGAN paper.
         """
-        parser.set_defaults(no_dropout=True, netG='unet_256')  # default CycleGAN did not use dropout
+        parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='celeba', batch_size=32)
         return parser
 
     def __init__(self, opt):
@@ -70,7 +70,7 @@ class TravelGANModel(BaseModel):
         self.loss_names = ['D', 'G_adv', 'TraVeL', 'Sc']
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
         visual_names_A = ['real_A', 'fake_B']
-        visual_names_B = ['real_B', 'fake_A']
+        visual_names_B = ['real_B']
 
         self.visual_names = visual_names_A + visual_names_B  # combine visualizations for A and B
         # specify the models you want to save to the disk. The training/test scripts will call <BaseModel.save_networks> and <BaseModel.load_networks>.
@@ -90,8 +90,6 @@ class TravelGANModel(BaseModel):
             self.netS = networks.define_D_travel(opt.input_nc, 5, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
 
         if self.isTrain:
-            if opt.lambda_identity > 0.0:  # only works when input and output images have the same number of channels
-                assert(opt.input_nc == opt.output_nc)
             self.fake_A_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
             self.fake_B_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
             # define loss functions
@@ -112,10 +110,10 @@ class TravelGANModel(BaseModel):
 
         The option 'direction' can be used to swap domain A and domain B.
         """
-        AtoB = self.opt.direction == 'AtoB'
+        # A - no hats, B - with hats
+        AtoB = self.opt.direction == 'BtoA'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
-        self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -151,19 +149,25 @@ class TravelGANModel(BaseModel):
     def backward_G(self):
         """Calculate the loss for generator and siamese network"""
         half = self.real_A.shape[0] // 2
+        end = 2 * half
 
         # Get embeddings of A and B
         v_A = self.netS(self.real_A)
         v_B = self.netS(self.real_B)
 
         # Transformation Vector loss
-        tvA = v_A[:half] - v_A[half:]
-        tvB = v_B[:half] - v_B[half:]
-        self.loss_TraVeL = self.criterionDist(tvA, tvB)
+        # for i in range(len(v_A)):
+        #     for j in range(len(v_A)):
+        #         if i != j:
+        #             d = v_A[i] - v_A[j]
+        #
+        tvA = v_A[:half] - v_A[half:end]
+        tvB = v_B[:half] - v_B[half:end]
+        self.loss_TraVeL = self.criterionDist(tvA, tvB, torch.tensor(1.).cuda())
 
         # Siamese contrastive loss
         # Use label=1 to arrive at the same loss described in the paper
-        self.loss_Sc = self.criterionSiamese(v_A[:half], v_A[half:], 1)
+        self.loss_Sc = self.criterionSiamese(v_A[:half], v_A[half:end], 1)
 
         # GAN loss D(G(A))
         self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B), True)
