@@ -57,6 +57,7 @@ class TravelGANModel(BaseModel):
         Dropout is not used in the original CycleGAN paper.
         """
         parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='celeba', batch_size=32,
+                            lr=0.0002, beta1=0.5,
                             gan_mode='vanilla')
         return parser
 
@@ -98,8 +99,8 @@ class TravelGANModel(BaseModel):
             self.criterionDist = nn.CosineEmbeddingLoss()
             self.criterionSiamese = ContrastiveLoss()
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
-            self.optimizer_G = optim.Adam(itertools.chain(self.netG.parameters(), self.netS.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
-            self.optimizer_D = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_G = optim.Adam(itertools.chain(self.netG.parameters(), self.netS.parameters()), lr=opt.lr, betas=(opt.beta1, 0.9))
+            self.optimizer_D = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.9))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
