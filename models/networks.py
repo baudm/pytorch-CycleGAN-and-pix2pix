@@ -159,28 +159,28 @@ class TravelDiscriminator(nn.Module):
         super().__init__()
         conv = [
             nn.Conv2d(input_nc, n, kernel_size=4, stride=2, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
             nn.BatchNorm2d(n),
+            nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(n, 2 * n, kernel_size=4, stride=2, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
             nn.BatchNorm2d(2 * n),
+            nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(2 * n, 4 * n, kernel_size=4, stride=2, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
             nn.BatchNorm2d(4 * n),
+            nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(4 * n, 8 * n, kernel_size=4, stride=2, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
             nn.BatchNorm2d(8 * n),
+            nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(8 * n, 8 * n, kernel_size=4, stride=2, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.BatchNorm2d(8 * n)
+            nn.BatchNorm2d(8 * n),
+            nn.LeakyReLU(0.2, inplace=True)
         ]
         # Remove first BN layer for the discriminator
         if is_discriminator:
-            conv.pop(2)
+            conv.pop(1)
         self.conv = nn.Sequential(*conv)
         self.fc = nn.Linear(n * 8 * 4 * 4, output_nc)
 

@@ -3,6 +3,9 @@ import torch.nn.functional as F
 from torch import nn, optim
 
 import itertools
+
+from torchsummary import summary
+
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
@@ -86,10 +89,13 @@ class TravelGANModel(BaseModel):
         # Code (vs. paper): G_A (G), G_B (F), D_A (D_Y), D_B (D_X)
         self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
                                       not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
+        summary(self.netG, (3, 128, 128))
 
         if self.isTrain:  # define discriminators
-            self.netD = networks.define_D_travel(opt.input_nc, 5, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
-            self.netS = networks.define_D_travel(opt.input_nc, 5, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
+            self.netD = networks.define_D_travel(opt.input_nc, 40, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
+            self.netS = networks.define_D_travel(opt.input_nc, 40, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
+            summary(self.netD, (3, 128, 128))
+            summary(self.netS, (3, 128, 128))
 
         if self.isTrain:
             self.fake_A_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
