@@ -4,8 +4,7 @@ import os
 
 import torch
 from PIL import Image
-from torch.utils import data
-from torchvision import transforms
+from torchvision import transforms as T
 
 from data import BaseDataset
 
@@ -13,21 +12,25 @@ from data import BaseDataset
 class CelebaDataset(BaseDataset):
     """Dataset class for the CelebA dataset."""
 
+    @staticmethod
+    def modify_commandline_options(parser, is_train):
+        parser.set_defaults(crop_size=128)
+        return parser
+
     def __init__(self, opt) -> None:
         """Initialize and preprocess the CelebA dataset."""
         super().__init__(opt)
         self._root = self.root
-        self._transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.CenterCrop(178),
-            transforms.Resize(128),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+        self._transform = T.Compose([
+            T.CenterCrop(178),
+            T.Resize(128),
+            T.RandomHorizontalFlip(),
+            T.ToTensor(),
+            T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
         ])
         self._preprocess()
         # Choose split
-        train = opt.isTrain
-        self._split_idx = self._train_idx if train else self._test_idx
+        self._split_idx = self._train_idx if opt.isTrain else self._test_idx
         # Filter
         target_attrs = [20, 35] # male, wearing hat
         male_w_hat = self._split_idx[(self._attrs[self._split_idx][:, target_attrs] == torch.tensor([True, True])).all(-1)]
@@ -73,32 +76,3 @@ class CelebaDataset(BaseDataset):
 
     def __len__(self):
         return max(map(len, self._attr_splits))
-
-#
-# def get_loader(root, crop_size=178, image_size=128,
-#                batch_size=16, mode='train', num_workers=1, eyeglasses=False):
-#     transformations = [
-#         transforms.RandomHorizontalFlip(),
-#         transforms.CenterCrop(crop_size),
-#         transforms.Resize(image_size),
-#         transforms.ToTensor(),
-#         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-#     ]
-#     transformations = transforms.Compose(transformations)
-#     dataset = PairedCelebA(root, train=True, transform=transformations, eyeglasses=eyeglasses)
-#     return data.DataLoader(dataset, batch_size, shuffle=True, num_workers=num_workers)
-#
-#
-# def eval_loader(crop_size=178, image_size=128,
-#                batch_size=16, mode='train', num_workers=1, eyeglasses=False):
-#     root = '/mnt/data/datasets/CelebA'
-#     transformations = [
-#         #transforms.RandomHorizontalFlip(),
-#         transforms.CenterCrop(crop_size),
-#         transforms.Resize(image_size),
-#         transforms.ToTensor(),
-#         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-#     ]
-#     transformations = transforms.Compose(transformations)
-#     dataset = PairedCelebA(root, train=False, transform=transformations, eyeglasses=eyeglasses)
-#     return data.DataLoader(dataset, batch_size, shuffle=False, num_workers=num_workers)

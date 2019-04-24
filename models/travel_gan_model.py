@@ -1,31 +1,13 @@
 import torch
 import torch.nn.functional as F
-from torch import nn, optim
+from torch import optim
 
 import itertools
 
 from torchsummary import summary
 
-from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
-
-
-class ContrastiveLoss(nn.Module):
-    """
-    Contrastive loss function.
-    Based on: http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
-    """
-
-    def __init__(self, margin=2.0):
-        super(ContrastiveLoss, self).__init__()
-        self.margin = margin
-
-    def forward(self, output1, output2, label):
-        euclidean_distance = F.pairwise_distance(output1, output2)
-        loss_contrastive = torch.mean((1 - label) * torch.pow(euclidean_distance, 2) +
-                                      (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
-        return loss_contrastive
 
 
 class TravelGANModel(BaseModel):
@@ -59,9 +41,17 @@ class TravelGANModel(BaseModel):
         Identity loss (optional): lambda_identity * (||G_A(B) - B|| * lambda_B + ||G_B(A) - A|| * lambda_A) (Sec 5.2 "Photo generation from paintings" in the paper)
         Dropout is not used in the original CycleGAN paper.
         """
-        parser.set_defaults(norm='batch', netG='unet_128', dataset_mode='celeba', batch_size=32,
-                            lr=0.0002, beta1=0.5,
-                            gan_mode='vanilla')
+        parser.set_defaults(
+            netG='unet_128', ndf=40, norm='batch',
+            dataset_mode='celeba', batch_size=32
+        )
+        if is_train:
+            parser.set_defaults(
+                lr=0.0002, beta1=0.5,
+                gan_mode='vanilla'
+            )
+            parser.add_argument('--beta2', type=float, default=0.9, help='second momentum term of adam')
+            parser.add_argument('--siamese_margin', type=float, default=50.0, help='Siamese contrastive loss margin')
         return parser
 
     def __init__(self, opt):
@@ -85,28 +75,24 @@ class TravelGANModel(BaseModel):
             self.model_names = ['G']
 
         # define networks (both Generators and discriminators)
-        # The naming is different from those used in the paper.
-        # Code (vs. paper): G_A (G), G_B (F), D_A (D_Y), D_B (D_X)
         self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
                                       not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
-        summary(self.netG, (3, 128, 128))
+        summary(self.netG, (opt.input_nc, opt.crop_size, opt.crop_size))
 
         if self.isTrain:  # define discriminators
-            self.netD = networks.define_D_travel(opt.input_nc, 40, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
-            self.netS = networks.define_D_travel(opt.input_nc, 40, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
-            summary(self.netD, (3, 128, 128))
-            summary(self.netS, (3, 128, 128))
+            self.netD = networks.define_D_travel(opt.input_nc, opt.ndf, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
+            self.netS = networks.define_D_travel(opt.input_nc, opt.ndf, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
+            summary(self.netD, (opt.input_nc, opt.crop_size, opt.crop_size))
+            summary(self.netS, (opt.input_nc, opt.crop_size, opt.crop_size))
 
         if self.isTrain:
-            self.fake_A_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
-            self.fake_B_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
-            self.criterionDist = nn.CosineEmbeddingLoss()
-            self.criterionSiamese = ContrastiveLoss()
+            self.criterionDist = lambda v1, v2: 1. - F.cosine_similarity(v1, v2, dim=-1)
+            self.criterionSiamese = lambda v: torch.clamp(opt.siamese_margin - torch.norm(v), min=0.)
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
-            self.optimizer_G = optim.Adam(itertools.chain(self.netG.parameters(), self.netS.parameters()), lr=opt.lr, betas=(opt.beta1, 0.9))
-            self.optimizer_D = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.9))
+            self.optimizer_G = optim.Adam(itertools.chain(self.netG.parameters(), self.netS.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
+            self.optimizer_D = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
@@ -127,64 +113,43 @@ class TravelGANModel(BaseModel):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         self.fake_B = self.netG(self.real_A)
 
-    def backward_D_basic(self, netD, real, fake):
-        """Calculate GAN loss for the discriminator
-
-        Parameters:
-            netD (network)      -- the discriminator D
-            real (tensor array) -- real images
-            fake (tensor array) -- images generated by a generator
-
-        Return the discriminator loss.
-        We also call loss_D.backward() to calculate the gradients.
-        """
+    def backward_D(self):
+        """Calculate GAN loss for the discriminator"""
         # Real
-        pred_real = netD(real)
+        pred_real = self.netD(self.real_B)
         loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
-        pred_fake = netD(fake.detach())
+        pred_fake = self.netD(self.fake_B.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
-        loss_D = (loss_D_real + loss_D_fake) * 0.5
-        loss_D.backward()
-        return loss_D
-
-    def backward_D(self):
-        """Calculate GAN loss for discriminator"""
-        fake_B = self.fake_B_pool.query(self.fake_B)
-        self.loss_D = self.backward_D_basic(self.netD, self.real_B, fake_B)
+        self.loss_D = (loss_D_real + loss_D_fake) * 0.5
+        self.loss_D.backward()
 
     def backward_G(self):
         """Calculate the loss for generator and siamese network"""
-        half = self.real_A.shape[0] // 2
-        end = 2 * half
-
-        # Get embeddings of A and B
+        # Get embeddings of A and G(A)
         v_A = self.netS(self.real_A)
-        v_B = self.netS(self.real_B)
+        v_B = self.netS(self.fake_B)
 
         # Transformation Vector loss
-        # for i in range(len(v_A)):
-        #     for j in range(len(v_A)):
-        #         if i != j:
-        #             d = v_A[i] - v_A[j]
-        #
-        tvA = v_A[:half] - v_A[half:end]
-        tvB = v_B[:half] - v_B[half:end]
-        self.loss_TraVeL = self.criterionDist(tvA, tvB, torch.tensor(1.).cuda())
-
+        self.loss_TraVeL = 0
         # Siamese contrastive loss
-        # Use label=1 to arrive at the same loss described in the paper
-        self.loss_Sc = self.criterionSiamese(v_A[:half], v_A[half:end], 1)
+        self.loss_Sc = 0
+        for i in range(len(v_A)):
+            for j in range(len(v_A)):
+                if i != j:
+                    v_A_d = v_A[i] - v_A[j]
+                    v_B_d = v_B[i] - v_B[j]
+                    self.loss_TraVeL += self.criterionDist(v_A_d, v_B_d)
+                    self.loss_Sc += self.criterionSiamese(v_A_d)
 
         # GAN loss D(G(A))
         self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B), True)
 
-        self.loss_S = self.loss_Sc + self.loss_TraVeL
-        self.loss_G = self.loss_G_adv + self.loss_TraVeL
-
-        self.loss_SG = self.loss_S + self.loss_G
-        self.loss_SG.backward()
+        loss_S = self.loss_Sc + self.loss_TraVeL
+        loss_G = self.loss_G_adv + self.loss_TraVeL
+        loss_total = loss_S + loss_G
+        loss_total.backward()
 
     def optimize_parameters(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
