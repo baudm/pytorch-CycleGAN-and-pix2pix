@@ -128,24 +128,31 @@ class TravelGANModel(BaseModel):
 
     def backward_G(self):
         """Calculate the loss for generator and siamese network"""
+        bs = len(self.real_A)
+
         # Get embeddings of A and G(A)
-        v_A = self.netS(self.real_A)
-        v_B = self.netS(self.fake_B)
+        s_A = self.netS(self.real_A)
+        s_B = self.netS(self.fake_B)
+
+        # Tile
+        s_A_i = s_A.repeat([bs - 1, 1])
+        s_B_i = s_B.repeat([bs - 1, 1])
+
+        # Tile in permuted order
+        i = torch.arange(bs)
+        idx = torch.cat([i.roll(s) for s in range(1, bs)])
+        s_A_j = s_A[idx]
+        s_B_j = s_B[idx]
+
+        # Get transformation vectors
+        v_A = s_A_i - s_A_j
+        v_B = s_B_i - s_B_j
 
         # Transformation Vector loss
-        self.loss_TraVeL = 0
-        # Siamese contrastive loss
-        self.loss_Sc = 0
-        idx = np.arange(len(v_A))
-        for i in range(len(v_A) - 1):
-            idx = np.roll(idx, 1)
-            v_A_d = v_A - v_A[idx]
-            v_B_d = v_B - v_B[idx]
-            self.loss_TraVeL += self.criterionDist(v_A_d, v_B_d)
-            self.loss_Sc += self.criterionSiamese(v_A_d)
+        self.loss_TraVeL = self.criterionDist(v_A, v_B).sum()
 
-        self.loss_Sc = self.loss_Sc.sum()
-        self.loss_TraVeL = self.loss_TraVeL.sum()
+        # Siamese contrastive loss
+        self.loss_Sc = self.criterionSiamese(v_A).sum()
 
         # GAN loss D(G(A))
         self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B), True)
