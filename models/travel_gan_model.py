@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import optim
@@ -89,7 +90,7 @@ class TravelGANModel(BaseModel):
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionDist = lambda v1, v2: 1. - F.cosine_similarity(v1, v2, dim=-1)
-            self.criterionSiamese = lambda v: torch.clamp(opt.siamese_margin - torch.norm(v), min=0.)
+            self.criterionSiamese = lambda v: torch.clamp(opt.siamese_margin - torch.norm(v, dim=-1), min=0.)
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = optim.Adam(itertools.chain(self.netG.parameters(), self.netS.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizer_D = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
@@ -135,13 +136,16 @@ class TravelGANModel(BaseModel):
         self.loss_TraVeL = 0
         # Siamese contrastive loss
         self.loss_Sc = 0
-        for i in range(len(v_A)):
-            for j in range(len(v_A)):
-                if i != j:
-                    v_A_d = v_A[i] - v_A[j]
-                    v_B_d = v_B[i] - v_B[j]
-                    self.loss_TraVeL += self.criterionDist(v_A_d, v_B_d)
-                    self.loss_Sc += self.criterionSiamese(v_A_d)
+        idx = np.arange(len(v_A))
+        for i in range(len(v_A) - 1):
+            idx = np.roll(idx, 1)
+            v_A_d = v_A - v_A[idx]
+            v_B_d = v_B - v_B[idx]
+            self.loss_TraVeL += self.criterionDist(v_A_d, v_B_d)
+            self.loss_Sc += self.criterionSiamese(v_A_d)
+
+        self.loss_Sc = self.loss_Sc.sum()
+        self.loss_TraVeL = self.loss_TraVeL.sum()
 
         # GAN loss D(G(A))
         self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B), True)
