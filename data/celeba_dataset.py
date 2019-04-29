@@ -21,13 +21,17 @@ class CelebaDataset(BaseDataset):
         """Initialize and preprocess the CelebA dataset."""
         super().__init__(opt)
         self._root = self.root
-        self._transform = T.Compose([
+        t = [
             T.CenterCrop(178),
             T.Resize(128),
             T.RandomHorizontalFlip(),
             T.ToTensor(),
             T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-        ])
+        ]
+        # Don't randomly flip images in test mode
+        if not opt.isTrain:
+            t.pop(2)
+        self._transform = T.Compose(t)
         self._preprocess()
         # Choose split
         self._split_idx = self._train_idx if opt.isTrain else self._test_idx
