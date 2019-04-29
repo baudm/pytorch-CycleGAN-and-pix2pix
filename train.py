@@ -18,13 +18,47 @@ See options/base_options.py and options/train_options.py for more training optio
 See training and test tips at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/tips.md
 See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/qa.md
 """
+import os
 import time
+
+import numpy as np
+import torch
+from PIL import Image
+
+from data.celeba_dataset import CelebaDataset
 from options.train_options import TrainOptions
 from data import create_dataset
 from models import create_model
+from util import util
 from util.visualizer import Visualizer
 
+
+def save_test_output(model, test_dataset, iter):
+    rows = []
+    row = []
+    for j in range(32):
+        d = test_dataset[j]
+        for k, v in d.items():
+            d[k] = v.unsqueeze(0)
+        model.set_input(d)
+        model.test()
+        visuals = model.get_current_visuals()
+        row.append(util.tensor2im(visuals['real_A']))
+        row.append(util.tensor2im(visuals['fake_B']))
+        if (j + 1) % 4 == 0:
+            rows.append(np.concatenate(row, axis=0))
+            row = []
+    plot = np.concatenate(rows, axis=1).squeeze()
+    Image.fromarray(plot).save(os.path.join(test_output_dir, '{}.png'.format(iter)))
+
+
 if __name__ == '__main__':
+    # Make training reproducible
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     opt = TrainOptions().parse()   # get training options
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     dataset_size = len(dataset)    # get the number of images in the dataset.
@@ -34,6 +68,17 @@ if __name__ == '__main__':
     model.setup(opt)               # regular setup: load and print networks; create schedulers
     visualizer = Visualizer(opt)   # create a visualizer that display/save images and plots
     total_iters = 0                # the total number of training iterations
+
+    # Create test dataset
+    opt.isTrain = False
+    test_dataset = CelebaDataset(opt)
+    opt.isTrain = True
+
+    test_output_dir = os.path.join(opt.checkpoints_dir, opt.name, 'test_outputs')
+    try:
+        os.makedirs(test_output_dir)
+    except FileExistsError:
+        pass
 
     for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):    # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
         epoch_start_time = time.time()  # timer for entire epoch
@@ -66,6 +111,7 @@ if __name__ == '__main__':
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
+                save_test_output(model, test_dataset, total_iters)
 
             iter_data_time = time.time()
         if epoch % opt.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
