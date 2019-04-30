@@ -17,7 +17,7 @@ class CelebaDataset(BaseDataset):
         parser.set_defaults(crop_size=128)
         return parser
 
-    def __init__(self, opt) -> None:
+    def __init__(self, opt, random_flip=True) -> None:
         """Initialize and preprocess the CelebA dataset."""
         super().__init__(opt)
         self._root = self.root
@@ -29,7 +29,7 @@ class CelebaDataset(BaseDataset):
             T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
         ]
         # Don't randomly flip images in test mode
-        if not opt.isTrain:
+        if not opt.isTrain or not random_flip:
             t.pop(2)
         self._transform = T.Compose(t)
         self._preprocess()

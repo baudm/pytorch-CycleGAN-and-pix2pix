@@ -33,11 +33,11 @@ from util import util
 from util.visualizer import Visualizer
 
 
-def save_test_output(model, test_dataset, iter):
+def save_output(model, dataset, outdir, iter):
     rows = []
     row = []
     for j in range(32):
-        d = test_dataset[j]
+        d = dataset[j]
         for k, v in d.items():
             d[k] = v.unsqueeze(0)
         model.set_input(d)
@@ -49,7 +49,7 @@ def save_test_output(model, test_dataset, iter):
             rows.append(np.concatenate(row, axis=0))
             row = []
     plot = np.concatenate(rows, axis=1).squeeze()
-    Image.fromarray(plot).save(os.path.join(test_output_dir, '{}.png'.format(iter)))
+    Image.fromarray(plot).save(os.path.join(outdir, '{}.png'.format(iter)))
 
 
 if __name__ == '__main__':
@@ -69,16 +69,15 @@ if __name__ == '__main__':
     visualizer = Visualizer(opt)   # create a visualizer that display/save images and plots
     total_iters = 0                # the total number of training iterations
 
-    # Create test dataset
+    # Create datasets for output generation
+    train_dataset = CelebaDataset(opt, random_flip=False)
     opt.isTrain = False
     test_dataset = CelebaDataset(opt)
     opt.isTrain = True
 
-    test_output_dir = os.path.join(opt.checkpoints_dir, opt.name, 'test_outputs')
-    try:
-        os.makedirs(test_output_dir)
-    except FileExistsError:
-        pass
+    train_output_dir = os.path.join(opt.checkpoints_dir, opt.name, 'outputs', 'train')
+    test_output_dir = os.path.join(opt.checkpoints_dir, opt.name, 'outputs', 'test')
+    util.mkdirs([train_output_dir, test_output_dir])
 
     for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):    # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
         epoch_start_time = time.time()  # timer for entire epoch
@@ -111,7 +110,8 @@ if __name__ == '__main__':
                 print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
                 save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
-                save_test_output(model, test_dataset, total_iters)
+                save_output(model, train_dataset, train_output_dir, total_iters)
+                save_output(model, test_dataset, test_output_dir, total_iters)
 
             iter_data_time = time.time()
         if epoch % opt.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
