@@ -49,7 +49,7 @@ class TravelGANModel(BaseModel):
         if is_train:
             parser.set_defaults(
                 lr=0.0002, beta1=0.5,
-                gan_mode='vanilla'
+                gan_mode='lsgan'
             )
             parser.add_argument('--beta2', type=float, default=0.9, help='second momentum term of adam')
             parser.add_argument('--siamese_margin', type=float, default=50.0, help='Siamese contrastive loss margin')
@@ -81,7 +81,8 @@ class TravelGANModel(BaseModel):
         summary(self.netG, (opt.input_nc, opt.crop_size, opt.crop_size))
 
         if self.isTrain:  # define discriminators
-            self.netD = networks.define_D_travel(opt.input_nc, opt.ndf, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
+            # self.netD = networks.define_D_travel(opt.input_nc, opt.ndf, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
+            self.netD = networks.define_D(opt.input_nc, 64, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
             self.netS = networks.define_D_travel(opt.input_nc, opt.ndf, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
             summary(self.netD, (opt.input_nc, opt.crop_size, opt.crop_size))
             summary(self.netS, (opt.input_nc, opt.crop_size, opt.crop_size))
