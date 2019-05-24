@@ -76,16 +76,16 @@ class TravelGANModel(BaseModel):
             self.model_names = ['G']
 
         # define networks (both Generators and discriminators)
-        self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG, opt.norm,
+        self.netG = networks.define_G(opt.input_nc + 2, opt.output_nc + 2, opt.ngf, opt.netG, opt.norm,
                                       not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
-        summary(self.netG, (opt.input_nc, opt.crop_size, opt.crop_size))
+        summary(self.netG, (opt.input_nc + 2, opt.crop_size, opt.crop_size))
 
         if self.isTrain:  # define discriminators
             # self.netD = networks.define_D_travel(opt.input_nc, opt.ndf, 1, True, opt.init_type, opt.init_gain, self.gpu_ids)
-            self.netD = networks.define_D(opt.input_nc, 64, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
-            self.netS = networks.define_D_travel(opt.input_nc, opt.ndf, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
-            summary(self.netD, (opt.input_nc, opt.crop_size, opt.crop_size))
-            summary(self.netS, (opt.input_nc, opt.crop_size, opt.crop_size))
+            self.netD = networks.define_D(opt.input_nc + 2, 64, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
+            self.netS = networks.define_D_travel(opt.input_nc + 2, opt.ndf, 1000, False, opt.init_type, opt.init_gain, self.gpu_ids)
+            summary(self.netD, (opt.input_nc + 2, opt.crop_size, opt.crop_size))
+            summary(self.netS, (opt.input_nc + 2, opt.crop_size, opt.crop_size))
 
         if self.isTrain:
             # define loss functions
@@ -111,17 +111,32 @@ class TravelGANModel(BaseModel):
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
 
+    def cat_coords(self, img):
+        bs = img.shape[0]
+        w, h = img.shape[-2:]
+        x = torch.linspace(-1, 1, w).to(self.device)
+        y = torch.linspace(-1, 1, h).to(self.device)
+        x, y = torch.meshgrid(x, y)
+        # Add two dimensions, tile so that shape is: (bs, 1, w, h)
+        x = x[2 * (None,)].repeat((bs, 1, 1, 1))
+        y = y[2 * (None,)].repeat((bs, 1, 1, 1))
+        # Concat channel dimensions
+        return torch.cat([img, x, y], dim=1)
+
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
-        self.fake_B = self.netG(self.real_A)
+        # CoordConv
+        self.fake_B_coord = self.netG(self.cat_coords(self.real_A))
+        # image without coordinates
+        self.fake_B = self.fake_B_coord[:, :3, :, :]
 
     def backward_D(self):
         """Calculate GAN loss for the discriminator"""
         # Real
-        pred_real = self.netD(self.real_B)
+        pred_real = self.netD(self.cat_coords(self.real_B))
         loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
-        pred_fake = self.netD(self.fake_B.detach())
+        pred_fake = self.netD(self.fake_B_coord.detach())
         loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         self.loss_D = (loss_D_real + loss_D_fake) * 0.5
@@ -132,8 +147,8 @@ class TravelGANModel(BaseModel):
         bs = len(self.real_A)
 
         # Get embeddings of A and G(A)
-        s_A = self.netS(self.real_A)
-        s_B = self.netS(self.fake_B)
+        s_A = self.netS(self.cat_coords(self.real_A))
+        s_B = self.netS(self.fake_B_coord)
 
         # Tile
         s_A_i = s_A.repeat([bs - 1, 1])
@@ -156,7 +171,7 @@ class TravelGANModel(BaseModel):
         self.loss_Sc = self.criterionSiamese(v_A).sum()
 
         # GAN loss D(G(A))
-        self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B), True)
+        self.loss_G_adv = self.criterionGAN(self.netD(self.fake_B_coord), True)
 
         loss_S = self.loss_Sc + self.loss_TraVeL
         loss_G = self.loss_G_adv + self.loss_TraVeL

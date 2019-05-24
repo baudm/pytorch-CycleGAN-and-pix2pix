@@ -76,6 +76,7 @@ class CelebaDataset(BaseDataset):
         images = [Image.open(os.path.join(self._root, 'Img', 'img_align_celeba', im)) for im in image_ids]
         if self._transform is not None:
             images = list(map(self._transform, images))
+
         return {'A': images[0], 'B': images[1]}
 
     def __len__(self):
